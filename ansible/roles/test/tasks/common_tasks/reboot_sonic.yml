@@ -13,13 +13,26 @@
 
 - name: "rebooting {{ inventory_hostname }} : {{ ansible_host }} with {{ reboot_type }}..."
   command: "{{ reboot_type }}"
-  async: 1
+  async: 300
   poll: 0
   become: yes
+  register: reboot_task
   ignore_errors: true
 
-- name: pause for 1 minute before check
-  pause: minutes=1
+- name: 'Poll reboot task status'
+  become: yes
+  async_status:
+    jid: "{{ reboot_task.ansible_job_id }}"
+  register: reboot_result
+  retries: 30
+  delay: 10
+  until: "{{ reboot_result.finished != 0 }}"
+  ignore_errors: true
+
+- name: 'Fail if {{ reboot_type }} failed'
+  fail:
+     msg: "{{ reboot_result.stderr }}"
+  when: "{{ reboot_result.rc is defined and reboot_result.rc != 0 }}"
 
 - name: Wait for switch to come back
   become: false
