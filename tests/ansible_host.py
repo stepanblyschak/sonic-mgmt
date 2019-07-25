@@ -1,6 +1,7 @@
-class ansible_host():
+class ansible_host(object):
+    """ wrapper for ansible host object """
     
-    def __init__(self, ansible_adhoc, hostname, is_local = False):
+    def __init__(self, ansible_adhoc, hostname, is_local=False):
         if is_local:
             self.host = ansible_adhoc(inventory='localhost', connection='local')[hostname]
         else:
@@ -14,7 +15,6 @@ class ansible_host():
         return self._run
 
     def _run(self, *module_args, **complex_args):
-   
         res = self.module(*module_args, **complex_args)[self.hostname]
         if res.is_failed:
             raise Exception("run module {} failed, errmsg {}".format(self.module_name, res))
