@@ -1,4 +1,4 @@
-class ansible_host(object):
+class AnsibleHost(object):
     """ wrapper for ansible host object """
     
     def __init__(self, ansible_adhoc, hostname, is_local=False):
