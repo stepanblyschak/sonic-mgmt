@@ -716,5 +716,3 @@ class TestAclWithPortToggle(TestBasicAcl):
 
         super(TestAclWithPortToggle, self).setup_rules(dut, localhost, setup, acl_table)
         port_toggle(dut)
-        logger.info('wait 1 minute for BGP sessions to startup')
-        time.sleep(60)  # wait for BGP sessions to startup
