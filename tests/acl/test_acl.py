@@ -636,15 +636,15 @@ class TestBasicAcl(BaseAclTest):
         """
 
         name = acl_table['acl_table_name']
-        dir = setup['dut_tmp_dir']
+        tmp_dir = setup['dut_tmp_dir']
 
         logger.info('generate config for ACL rule ACL table {table_name}'.format(table_name=name))
         dut.template(src='acl/templates/acltb_test_rules.j2',
-                     dest='{dir}/acl_rules_{name}.json'.format(dir=dir,
+                     dest='{dir}/acl_rules_{name}.json'.format(dir=tmp_dir,
                                                                name=name)
         )
 
-        dut.command('config acl update full {}/acl_rules_{}.json'.format(dir, name))
+        dut.command('config acl update full {}/acl_rules_{}.json'.format(tmp_dir, name))
 
 
 class TestIncrementalAcl(BaseAclTest):
