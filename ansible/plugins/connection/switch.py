@@ -16,6 +16,8 @@ from ansible import constants as C
 from ansible.errors import AnsibleError, AnsibleConnectionFailure, AnsibleFileNotFound
 from ansible.plugins.connection import ConnectionBase
 
+WINTTYSIZE = (999, 80)
+
 class Connection(ConnectionBase):
     ''' ssh based connections with expect '''
 
@@ -72,6 +74,7 @@ class Connection(ConnectionBase):
                               host=self.host)
                 last_user = user
                 client = pexpect.spawn(' '.join(cmd), env={'TERM': 'dumb'}, timeout=self.timeout)
+                client.setwinsize(*WINTTYSIZE)
                 i = client.expect(['[Pp]assword:', pexpect.EOF])
                 if i == 1:
                     self._display.vvv("Server closed the connection, retry in %d seconds" % self.connection_retry_interval, host=self.host)
