@@ -154,6 +154,7 @@ class ReloadTest(BaseTest):
         self.check_param('vnet', False, required = False)
         self.check_param('vnet_pkts', None, required = False)
         self.check_param('target_version', '', required = False)
+        self.check_param('use_fast_io_thread', True, required = False)
         if not self.test_params['preboot_oper'] or self.test_params['preboot_oper'] == 'None':
             self.test_params['preboot_oper'] = None
         if not self.test_params['inboot_oper'] or self.test_params['inboot_oper'] == 'None':
@@ -491,6 +492,7 @@ class ReloadTest(BaseTest):
         self.reboot_type = self.test_params['reboot_type']
         if self.reboot_type not in ['fast-reboot', 'warm-reboot']:
             raise ValueError('Not supported reboot_type %s' % self.reboot_type)
+        self.use_fast_io_thread = self.test_params['use_fast_io_thread']
         self.dut_mac = self.test_params['dut_mac']
 
         # get VM info
@@ -540,6 +542,7 @@ class ReloadTest(BaseTest):
         if self.reboot_type == 'warm-reboot':
             self.log(self.get_sad_info())
 
+        if self.use_fast_io_thread:
             # Pre-generate list of packets to be sent in send_in_background method.
             generate_start = datetime.datetime.now()
             if not self.vnet:
@@ -819,7 +822,30 @@ class ReloadTest(BaseTest):
             self.reboot_start = datetime.datetime.now()
             self.log("Dut reboots: reboot start %s" % str(self.reboot_start))
 
-            if self.reboot_type == 'fast-reboot':
+            if self.use_fast_io_thread:
+                self.send_and_sniff()
+
+                # Stop watching DUT
+                self.watching = False
+                self.log("Stopping reachability state watch thread.")
+                self.watcher_is_stopped.wait(timeout = 10)  # Wait for the Watcher stopped.
+
+                self.save_sniffed_packets()
+
+                examine_start = datetime.datetime.now()
+                self.log("Packet flow examine started %s after the reboot" % str(examine_start - self.reboot_start))
+                self.examine_flow()
+                self.log("Packet flow examine finished after %s" % str(datetime.datetime.now() - examine_start))
+
+                if self.lost_packets:
+                    no_routing_stop, no_routing_start = datetime.datetime.fromtimestamp(self.no_routing_stop), datetime.datetime.fromtimestamp(self.no_routing_start)
+                    self.log("The longest disruption lasted %.3f seconds. %d packet(s) lost." % (self.max_disrupt_time, self.max_lost_id))
+                    self.log("Total disruptions count is %d. All disruptions lasted %.3f seconds. Total %d packet(s) lost" % \
+                        (self.disrupts_count, self.total_disrupt_time, self.total_disrupt_packets))
+                else:
+                    no_routing_start = self.reboot_start
+                    no_routing_stop  = self.reboot_start
+            else:
                 self.log("Check that device is still forwarding data plane traffic")
                 self.fails['dut'].add("Data plane has a forwarding problem after CPU went down")
                 self.check_alive()
@@ -857,30 +883,6 @@ class ReloadTest(BaseTest):
                 # Stop watching DUT
                 self.watching = False
 
-            if self.reboot_type == 'warm-reboot':
-                self.send_and_sniff()
-
-                # Stop watching DUT
-                self.watching = False
-                self.log("Stopping reachability state watch thread.")
-                self.watcher_is_stopped.wait(timeout = 10)  # Wait for the Watcher stopped.
-
-                self.save_sniffed_packets()
-
-                examine_start = datetime.datetime.now()
-                self.log("Packet flow examine started %s after the reboot" % str(examine_start - self.reboot_start))
-                self.examine_flow()
-                self.log("Packet flow examine finished after %s" % str(datetime.datetime.now() - examine_start))
-
-                if self.lost_packets:
-                    no_routing_stop, no_routing_start = datetime.datetime.fromtimestamp(self.no_routing_stop), datetime.datetime.fromtimestamp(self.no_routing_start)
-                    self.log("The longest disruption lasted %.3f seconds. %d packet(s) lost." % (self.max_disrupt_time, self.max_lost_id))
-                    self.log("Total disruptions count is %d. All disruptions lasted %.3f seconds. Total %d packet(s) lost" % \
-                        (self.disrupts_count, self.total_disrupt_time, self.total_disrupt_packets))
-                else:
-                    no_routing_start = self.reboot_start
-                    no_routing_stop  = self.reboot_start
-
             # wait until all bgp session are established
             self.log("Wait until bgp routing is up on all devices")
             for _, q in self.ssh_jobs:
@@ -898,22 +900,18 @@ class ReloadTest(BaseTest):
             self.log("Data plane works again. Start time: %s" % str(no_routing_stop))
             self.log("")
 
-            if self.reboot_type == 'fast-reboot':
-                no_cp_replies = self.extract_no_cpu_replies(upper_replies)
-
             if no_routing_stop - no_routing_start > self.limit:
                 self.fails['dut'].add("Longest downtime period must be less then %s seconds. It was %s" \
                         % (self.test_params['reboot_limit_in_seconds'], str(no_routing_stop - no_routing_start)))
             if no_routing_stop - self.reboot_start > datetime.timedelta(seconds=self.test_params['graceful_limit']):
                 self.fails['dut'].add("%s cycle must be less than graceful limit %s seconds" % (self.reboot_type, self.test_params['graceful_limit']))
-            if self.reboot_type == 'fast-reboot' and no_cp_replies < 0.95 * self.nr_vl_pkts:
-                self.fails['dut'].add("Dataplane didn't route to all servers, when control-plane was down: %d vs %d" % (no_cp_replies, self.nr_vl_pkts))
 
-            if self.reboot_type == 'warm-reboot':
+            if self.use_fast_io_thread:
                 if self.total_disrupt_time > self.limit.total_seconds():
                     self.fails['dut'].add("Total downtime period must be less then %s seconds. It was %s" \
                         % (str(self.limit), str(self.total_disrupt_time)))
 
+            if self.reboot_type == 'warm-reboot':
                 # after the data plane is up, check for routing changes
                 if self.test_params['inboot_oper'] and self.sad_handle:
                     self.check_inboot_sad_status()
@@ -1034,19 +1032,6 @@ class ReloadTest(BaseTest):
                     target_version, current_version))
                 return False
         return True
-
-    def extract_no_cpu_replies(self, arr):
-      """
-      This function tries to extract number of replies from dataplane, when control plane is non working
-      """
-      # remove all tail zero values
-      non_zero = filter(lambda x : x > 0, arr)
-
-      # check that last value is different from previos
-      if len(non_zero) > 1 and non_zero[-1] < non_zero[-2]:
-          return non_zero[-2]
-      else:
-          return non_zero[-1]
 
     def reboot_dut(self):
         time.sleep(self.reboot_delay)
